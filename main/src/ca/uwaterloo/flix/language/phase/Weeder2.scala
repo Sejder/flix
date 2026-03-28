@@ -1387,9 +1387,29 @@ object Weeder2 {
 
     private def visitStatementExpr(tree: Tree)(implicit sctx: SharedContext): Validation[Expr, CompilationMessage] = {
       expect(tree, TreeKind.Expr.Statement)
-      mapN(traverse(pickAll(TreeKind.Expr.Expr, tree))(visitExpr)) {
-        case ex1 :: ex2 :: Nil => Expr.Stm(List(ex1), ex2, tree.loc)
-        case exprs => throw InternalCompilerException(s"Parser error. Expected 2 expressions in statement but found '${exprs.length}'.", tree.loc)
+      // Iteratively collect head expression trees from the right-nested Statement chain
+      // to avoid stack overflow on long statement sequences (e.g. 5000+ semicolons).
+      val headTrees = mutable.ArrayBuffer.empty[Tree]
+      var current = tree
+      var done = false
+      var tailTree: Tree = null
+      while (!done) {
+        pickAll(TreeKind.Expr.Expr, current) match {
+          case first :: second :: Nil =>
+            headTrees.addOne(first)
+            val inner = unfold(second)
+            if (inner.kind == TreeKind.Expr.Statement) {
+              current = inner
+            } else {
+              tailTree = second
+              done = true
+            }
+          case exprs =>
+            throw InternalCompilerException(s"Parser error. Expected 2 expressions in statement but found '${exprs.length}'.", current.loc)
+        }
+      }
+      mapN(traverse(headTrees.toList)(visitExpr), visitExpr(tailTree)) {
+        case (exps, exp) => Expr.Stm(exps, exp, tree.loc)
       }
     }
 
@@ -1408,7 +1428,9 @@ object Weeder2 {
 
       // Extract (defBody, restExp) from the Stm wrapping the local def.
       val exprs = mapN(pickExpr(tree)) {
-        case Expr.Stm(defBody :: Nil, exp, _) => (defBody, exp)
+        case Expr.Stm(defBody :: rest, exp, loc) =>
+          val continuation = if (rest.isEmpty) exp else Expr.Stm(rest, exp, loc)
+          (defBody, continuation)
         case e =>
           // Fall back on Expr.Error. Parser has reported an error here.
           val error = Malformed(NamedTokenSet.FromKinds(Set(TokenKind.KeywordDef)), SyntacticContext.Expr.OtherExpr, hint = Some("Internal definitions must be followed by an expression"), loc = e.loc)
@@ -1607,7 +1629,9 @@ object Weeder2 {
         (pattern, tpe, expr) =>
           // Extract (boundValue, restExp) from the Stm wrapping the let-match.
           val exprs = expr match {
-            case Expr.Stm(boundValue :: Nil, exp, _) => Validation.Success((boundValue, exp))
+            case Expr.Stm(boundValue :: rest, exp, loc) =>
+              val continuation = if (rest.isEmpty) exp else Expr.Stm(rest, exp, loc)
+              Validation.Success((boundValue, continuation))
             // Fall back on Expr.Error. Parser has reported an error here.
             case e =>
               // The location of the error is the end of the expression, zero-width.
