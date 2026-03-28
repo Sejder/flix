@@ -1387,7 +1387,7 @@ object Weeder2 {
 
     private def visitStatementExpr(tree: Tree)(implicit sctx: SharedContext): Validation[Expr, CompilationMessage] = {
       expect(tree, TreeKind.Expr.Statement)
-      // Iteratively collect head expression trees from the right-nested Statement chain
+      // Iteratively collect expression trees from the right-nested Statement chain
       // to avoid stack overflow on long statement sequences (e.g. 5000+ semicolons).
       val headTrees = mutable.ArrayBuffer.empty[Tree]
       var current = tree

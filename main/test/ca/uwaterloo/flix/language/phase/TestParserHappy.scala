@@ -29,6 +29,22 @@ class TestParserHappy extends AnyFunSuite with TestUtils {
     expectSuccess(result)
   }
 
+  test("FlatStm.ThreeStatements") {
+    // Test that a three-statement chain (like MutList.push) compiles correctly.
+    val input =
+      """
+        |def f(): Unit \ IO = checked_ecast(())
+        |def g(): Unit \ IO = checked_ecast(())
+        |def main(): Int32 \ IO = {
+        |    f();
+        |    g();
+        |    42
+        |}
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibMin)
+    expectSuccess(result)
+  }
+
   test("DeepStatementChain.01") {
     // Regression test: 1000 statement expressions must not cause stack overflow.
     val n = 1000
