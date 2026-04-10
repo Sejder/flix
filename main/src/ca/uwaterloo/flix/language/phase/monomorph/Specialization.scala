@@ -19,7 +19,7 @@ package ca.uwaterloo.flix.language.phase.monomorph
 import ca.uwaterloo.flix.api.Flix
 import ca.uwaterloo.flix.language.ast.TypedAst.{Binder, Expr, Instance, StructField}
 import ca.uwaterloo.flix.language.ast.shared.SymUse.{CaseSymUse, DefSymUse, LocalDefSymUse}
-import ca.uwaterloo.flix.language.ast.shared.Scope
+import ca.uwaterloo.flix.language.ast.shared.RegionScope
 import ca.uwaterloo.flix.language.ast.{Kind, MonoAst, Name, RigidityEnv, SemanticOp, SourceLocation, Symbol, Type, TypeConstructor, TypedAst}
 import ca.uwaterloo.flix.language.dbg.AstPrinter.*
 import ca.uwaterloo.flix.language.phase.typer.{ConstraintSolver2, Progress, TypeReduction2}
@@ -557,7 +557,7 @@ object Specialization {
           case Type.Cst(TypeConstructor.Pure, _) => "Pure"
           case _                                 => "Impure"
         }
-        val caseSym = Symbol.mkCaseSym(purityEnumSym, Name.Ident(caseName, loc))
+        val caseSym = root.enums(purityEnumSym).cases.values.find(_.sym.name == caseName).get.sym
         val symUse = CaseSymUse(caseSym, loc)
         val resultType = Type.mkEnum(purityEnumSym, Nil, loc)
         Expr.Tag(symUse, Nil, resultType, Type.Pure, loc)
@@ -579,7 +579,7 @@ object Specialization {
           case Type.Cst(TypeConstructor.Float64, _) => "JvmFloat64"
           case _                                    => "JvmObject"
         }
-        val caseSym = Symbol.mkCaseSym(jvmTypeEnumSym, Name.Ident(caseName, loc))
+        val caseSym = root.enums(jvmTypeEnumSym).cases.values.find(_.sym.name == caseName).get.sym
         val symUse = CaseSymUse(caseSym, loc)
         val resultType = Type.mkEnum(jvmTypeEnumSym, Nil, loc)
         Expr.Tag(symUse, Nil, resultType, Type.Pure, loc)
@@ -600,7 +600,7 @@ object Specialization {
           case Type.Cst(TypeConstructor.Float64, _) => "JvmFloat64"
           case _                                    => "JvmObject"
         }
-        val caseSym = Symbol.mkCaseSym(jvmValueEnumSym, Name.Ident(caseName, loc))
+        val caseSym = root.enums(jvmValueEnumSym).cases.values.find(_.sym.name == caseName).get.sym
         val symUse = CaseSymUse(caseSym, loc)
         val tagArg = if (caseName == "JvmObject") {
           val objType = Type.mkNative(classOf[java.lang.Object], loc)
@@ -1219,7 +1219,7 @@ object Specialization {
     val trt = root.traits(sym.trt)
 
     // Find out what instance to use by unifying with the sig type.
-    val subst = ConstraintSolver2.fullyUnify(sig.spec.declaredScheme.base, tpe, Scope.Top, RigidityEnv.empty)(root.eqEnv, flix).get
+    val subst = ConstraintSolver2.fullyUnify(sig.spec.declaredScheme.base, tpe, RegionScope.Top, RigidityEnv.empty)(root.eqEnv, flix).get
     val traitType = subst.m(trt.tparam.sym)
     val tyCon = traitType.typeConstructor.get
 
@@ -1305,7 +1305,7 @@ object Specialization {
 
   /** Unifies `tpe1` and `tpe2` which must be unifiable. */
   private def infallibleUnify(tpe1: Type, tpe2: Type, sym: Symbol.DefnSym)(implicit root: TypedAst.Root, flix: Flix): StrictSubstitution = {
-    ConstraintSolver2.fullyUnify(tpe1, tpe2, Scope.Top, RigidityEnv.empty)(root.eqEnv, flix) match {
+    ConstraintSolver2.fullyUnify(tpe1, tpe2, RegionScope.Top, RigidityEnv.empty)(root.eqEnv, flix) match {
       case Some(subst) =>
         StrictSubstitution.mk(subst)
       case None =>
@@ -1316,12 +1316,13 @@ object Specialization {
   /** Reduces the given associated into its definition, will crash if not able to. */
   private def reduceAssocType(assoc: Type.AssocType)(implicit root: TypedAst.Root, flix: Flix): Type = {
     // Since assoc is ground, `scope` will be unused.
-    val scope = Scope.Top
+    val scope = RegionScope.Top
     // Since assoc is ground, `renv` will be unused.
     val renv = RigidityEnv.empty
     val progress = Progress()
 
-    val res = TypeReduction2.reduce(assoc, scope, renv)(progress, root.eqEnv, flix)
+    val (res, cs) = TypeReduction2.reduce(assoc)(scope, renv, progress, root.eqEnv, flix)
+    if (cs.nonEmpty) throw InternalCompilerException(s"unexpected constraints: $cs", assoc.loc)
 
     if (progress.query()) res
     else throw InternalCompilerException(s"Could not reduce associated type $assoc", assoc.loc)

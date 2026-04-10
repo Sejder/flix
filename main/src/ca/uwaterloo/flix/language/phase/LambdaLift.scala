@@ -29,7 +29,7 @@ import scala.jdk.CollectionConverters.*
 object LambdaLift {
 
   // We are safe to use the top scope everywhere because we do not use unification in this or future phases.
-  private implicit val S: Scope = Scope.Top
+  private implicit val S: RegionScope = RegionScope.Top
 
   /**
     * Performs lambda lifting on the given AST `root`.
@@ -182,6 +182,12 @@ object LambdaLift {
 
     case SimplifiedAst.Expr.JumpTo(sym, tpe, purity, loc) =>
       LiftedAst.Expr.JumpTo(sym, tpe, purity, loc)
+
+    case SimplifiedAst.Expr.Switch(exp, enumSym, cases, defaultExp, tpe, purity, loc) =>
+      val e = visitExp(exp)
+      val cs = cases.map { case (sym, br) => sym -> visitExp(br) }
+      val d = visitExp(defaultExp)
+      LiftedAst.Expr.Switch(e, enumSym, cs, d, tpe, purity, loc)
 
     case SimplifiedAst.Expr.Let(sym, exp1, exp2, tpe, purity, loc) =>
       val e1 = visitExp(exp1)

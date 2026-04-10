@@ -18,7 +18,7 @@ package ca.uwaterloo.flix.language.phase
 
 import ca.uwaterloo.flix.api.Flix
 import ca.uwaterloo.flix.language.ast.Symbol.VarSym
-import ca.uwaterloo.flix.language.ast.shared.{BoundBy, ExpPosition, Scope}
+import ca.uwaterloo.flix.language.ast.shared.{BoundBy, ExpPosition, RegionScope}
 import ca.uwaterloo.flix.language.ast.{AtomicOp, LiftedAst, ReducedAst, SemanticOp, SourceLocation, Symbol}
 import ca.uwaterloo.flix.language.dbg.AstPrinter.DebugReducedAst
 import ca.uwaterloo.flix.language.phase.jvm.GenExpression
@@ -46,7 +46,7 @@ import scala.collection.mutable
 object EffectBinder {
 
   // We are safe to use the top scope everywhere because we do not use unification in this or future phases.
-  private implicit val S: Scope = Scope.Top
+  private implicit val S: RegionScope = RegionScope.Top
 
   /**
     * Transforms the AST such that effect operations will be run without an
@@ -184,6 +184,12 @@ object EffectBinder {
       val e = visitExprInnerWithBinders(binders)(exp0)
       bindBinders(binders, e)
 
+    case LiftedAst.Expr.Switch(exp, enumSym, cases, defaultExp, tpe, purity, loc) =>
+      val e = visitExpr(exp)
+      val cs = cases.map { case (sym, body) => (sym, visitExpr(body)) }
+      val d = visitExpr(defaultExp)
+      ReducedAst.Expr.Switch(e, enumSym, cs, d, tpe, purity, loc)
+
     case LiftedAst.Expr.Let(sym, exp1, exp2, _, _, loc) =>
       val binders = mutable.ArrayBuffer.empty[Binder]
       val e1 = visitExprInnerWithBinders(binders)(exp1)
@@ -281,6 +287,12 @@ object EffectBinder {
     case LiftedAst.Expr.JumpTo(sym, tpe, purity, loc) =>
       ReducedAst.Expr.JumpTo(sym, tpe, purity, loc)
 
+    case LiftedAst.Expr.Switch(exp, enumSym, cases, defaultExp, tpe, purity, loc) =>
+      val e = visitExpr(exp)
+      val cs = cases.map { case (sym, body) => (sym, visitExpr(body)) }
+      val d = visitExpr(defaultExp)
+      ReducedAst.Expr.Switch(e, enumSym, cs, d, tpe, purity, loc)
+
     case LiftedAst.Expr.Let(sym, exp1, exp2, _, _, loc) =>
       val e1 = visitExprInnerWithBinders(binders)(exp1)
       binders.addOne(LetBinder(sym, e1, loc))
@@ -350,6 +362,7 @@ object EffectBinder {
       case ReducedAst.Expr.ApplySelfTail(_, _, _, _, _) => letBindExpr(binders)(e)
       case ReducedAst.Expr.IfThenElse(_, _, _, _, _, _) => letBindExpr(binders)(e)
       case ReducedAst.Expr.Branch(_, _, _, _, _) => letBindExpr(binders)(e)
+      case ReducedAst.Expr.Switch(_, _, _, _, _, _, _) => letBindExpr(binders)(e)
       case ReducedAst.Expr.Let(sym, exp1, exp2, loc) =>
         binders.addOne(LetBinder(sym, exp1, loc))
         bind(exp2)

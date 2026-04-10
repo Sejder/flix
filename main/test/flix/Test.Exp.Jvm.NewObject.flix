@@ -224,7 +224,7 @@ mod Test.Exp.Jvm.NewObject {
 
     @Test
     def testGenericInterface01(): Unit \ Assert + IO =
-        let anon = new TestGenericInterface {
+        let anon = new TestGenericInterface[Object] {
             def testMethod(_this: TestGenericInterface[Object], x: Object): Object =
                 let str = unchecked_cast(x as String);
                 checked_cast("${str}, ${str}")
@@ -242,7 +242,7 @@ mod Test.Exp.Jvm.NewObject {
 
     @Test
     def testAliasesInObject01(): Unit \ Assert + IO =
-        let anon = new TestGenericInterface {
+        let anon = new TestGenericInterface[Object] {
             def testMethod(_this: TestGenericInterface[Object], x: Object): Object =
                 let str = unchecked_cast(x as String);
                 checked_cast("${str}, ${str}")
@@ -273,8 +273,8 @@ mod Test.Exp.Jvm.NewObject {
 
     @Test
     def testFunctionalInterface02(): Unit \ Assert + IO =
-        let anon = new Comparator {
-            def compare(_this: Comparator[Object], _t: Object, _u: Object): Int32 = 0
+        let anon = new Comparator[String] {
+            def compare(_this: Comparator[String], _t: String, _u: String): Int32 = 0
         };
         assertEq(expected = 0, anon.compare("foo", "bar"))
 

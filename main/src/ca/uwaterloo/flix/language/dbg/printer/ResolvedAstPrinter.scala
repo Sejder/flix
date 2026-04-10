@@ -106,13 +106,13 @@ object ResolvedAstPrinter {
     case Expr.InvokeConstructor(_, _, _) => DocAst.Expr.Unknown
     case Expr.InvokeSuperConstructor(_, _, _) => DocAst.Expr.Unknown
     case Expr.InvokeMethod(_, _, _, _) => DocAst.Expr.Unknown
-    case Expr.InvokeSuperMethod(_, _, _, _) => DocAst.Expr.Unknown
+    case Expr.InvokeSuperMethod(_, _, _, _, _) => DocAst.Expr.Unknown
     case Expr.InvokeStaticMethod(_, _, _, _) => DocAst.Expr.Unknown
     case Expr.GetField(_, _, _) => DocAst.Expr.Unknown
     case Expr.PutField(_, _, _, _, _) => DocAst.Expr.Unknown
     case Expr.GetStaticField(_, _) => DocAst.Expr.Unknown
     case Expr.PutStaticField(_, _, _) => DocAst.Expr.Unknown
-    case Expr.NewObject(_, _, _, _, _) => DocAst.Expr.Unknown
+    case Expr.NewObject(_, _, _, _, _, _) => DocAst.Expr.Unknown
     case Expr.NewChannel(_, _) => DocAst.Expr.Unknown
     case Expr.GetChannel(_, _) => DocAst.Expr.Unknown
     case Expr.PutChannel(_, _, _) => DocAst.Expr.Unknown

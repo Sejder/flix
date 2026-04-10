@@ -22,7 +22,7 @@ import ca.uwaterloo.flix.language.ast.TypedAst.{DefaultHandler, Predicate}
 import ca.uwaterloo.flix.language.ast.MonoAst.{DefContext, Occur}
 import ca.uwaterloo.flix.language.ast.ops.TypedAstOps
 import ca.uwaterloo.flix.language.ast.TypedAst.ApplyPosition
-import ca.uwaterloo.flix.language.ast.shared.{BoundBy, Constant, Decreasing, Denotation, Fixity, Mutability, Polarity, PredicateAndArity, Scope, SolveMode, SymUse, TypeSource}
+import ca.uwaterloo.flix.language.ast.shared.{BoundBy, Constant, Decreasing, Denotation, Fixity, Mutability, Polarity, PredicateAndArity, RegionScope, SolveMode, SymUse, TypeSource}
 import ca.uwaterloo.flix.language.ast.{AtomicOp, MonoAst, Name, SemanticOp, SourceLocation, Symbol, Type, TypeConstructor, TypedAst}
 import ca.uwaterloo.flix.language.phase.monomorph.Specialization.Context
 import ca.uwaterloo.flix.language.phase.monomorph.Symbols.{Defs, Enums, Types}
@@ -466,7 +466,7 @@ object Lowering {
       // handler sym { rules }
       // is lowered to
       // handlerBody -> try handlerBody() with sym { rules }
-      val bodySym = Symbol.freshVarSym("handlerBody", BoundBy.FormalParam, loc.asSynthetic)(Scope.Top, flix)
+      val bodySym = Symbol.freshVarSym("handlerBody", BoundBy.FormalParam, loc.asSynthetic)(RegionScope.Top, flix)
       val rs = rules.map(lowerHandlerRule)
       val bt = lowerType(bodyTpe)
       val t = lowerType(tpe)
@@ -482,7 +482,7 @@ object Lowering {
       // is lowered to
       // exp2(_runWith -> exp1)
       val e1 = lowerExp(exp1)
-      val unitParam = MonoAst.FormalParam(Symbol.freshVarSym("_runWith", BoundBy.FormalParam, loc.asSynthetic)(Scope.Top, flix), Type.Unit, Occur.Unknown, loc.asSynthetic)
+      val unitParam = MonoAst.FormalParam(Symbol.freshVarSym("_runWith", BoundBy.FormalParam, loc.asSynthetic)(RegionScope.Top, flix), Type.Unit, Occur.Unknown, loc.asSynthetic)
       val thunkType = Type.mkArrowWithEffect(Type.Unit, e1.eff, e1.tpe, loc.asSynthetic)
       val thunk = MonoAst.Expr.Lambda(unitParam, e1, thunkType, loc.asSynthetic)
       val t = lowerType(tpe)
@@ -907,7 +907,7 @@ object Lowering {
     val innerLambda =
       TypedAst.Expr.Lambda(
         TypedAst.FormalParam(
-          TypedAst.Binder(Symbol.freshVarSym("_", BoundBy.FormalParam, expLoc)(Scope.Top, flix), Type.Unit),
+          TypedAst.Binder(Symbol.freshVarSym("_", BoundBy.FormalParam, expLoc)(RegionScope.Top, flix), Type.Unit),
           Type.Unit,
           TypeSource.Inferred,
           Decreasing.NonDecreasing,
@@ -1116,10 +1116,12 @@ object Lowering {
 
   /**
     * Lowers `sym` from a restrictable case sym into a regular case sym.
+    *
+    * NB: Ordinal is -1 because restrictable enums do not have fixed ordinals.
     */
   private def lowerRestrictableCaseSym(sym: Symbol.RestrictableCaseSym): Symbol.CaseSym = {
     val enumSym = lowerRestrictableEnumSym(sym.enumSym)
-    new Symbol.CaseSym(enumSym, sym.name, sym.loc)
+    new Symbol.CaseSym(enumSym, sym.name, -1, sym.loc)
   }
 
   /**
@@ -1410,7 +1412,7 @@ object Lowering {
     *
     * @param elmType is assumed to be specialized and lowered.
     */
-  private def mkList(exps: List[MonoAst.Expr], elmType: Type, loc: SourceLocation): MonoAst.Expr = {
+  private def mkList(exps: List[MonoAst.Expr], elmType: Type, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = {
     val nil = mkNil(elmType, loc)
     exps.foldRight(nil) {
       case (e, acc) => mkCons(e, acc, loc)
@@ -1422,14 +1424,14 @@ object Lowering {
     *
     * @param elmType is assumed to be specialized and lowered.
     */
-  private def mkNil(elmType: Type, loc: SourceLocation): MonoAst.Expr = {
+  private def mkNil(elmType: Type, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = {
     mkTag(Enums.FList, "Nil", Nil, Types.mkList(elmType, loc), loc)
   }
 
   /**
     * returns a `Cons(hd, tail)` expression with type `tail.tpe`.
     */
-  private def mkCons(hd: MonoAst.Expr, tail: MonoAst.Expr, loc: SourceLocation): MonoAst.Expr = {
+  private def mkCons(hd: MonoAst.Expr, tail: MonoAst.Expr, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = {
     mkTag(Enums.FList, "Cons", List(hd, tail), lowerType(tail.tpe), loc)
   }
 
@@ -1438,8 +1440,8 @@ object Lowering {
     *
     * @param tpe is assumed to be specialized and lowered.
     */
-  private def mkTag(sym: Symbol.EnumSym, tag: String, exps: List[MonoAst.Expr], tpe: Type, loc: SourceLocation): MonoAst.Expr = {
-    val caseSym = new Symbol.CaseSym(sym, tag, loc.asSynthetic)
+  private def mkTag(sym: Symbol.EnumSym, tag: String, exps: List[MonoAst.Expr], tpe: Type, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = {
+    val caseSym = root.enums(sym).cases.values.find(_.sym.name == tag).get.sym
     MonoAst.Expr.ApplyAtomic(AtomicOp.Tag(caseSym), exps, tpe, Type.Pure, loc)
   }
 
@@ -1469,7 +1471,7 @@ object Lowering {
     */
   private def mkLetSym(prefix: String, loc: SourceLocation)(implicit flix: Flix): Symbol.VarSym = {
     val name = prefix + Flix.Delimiter + flix.genSym.freshId()
-    Symbol.freshVarSym(name, BoundBy.Let, loc)(Scope.Top, flix)
+    Symbol.freshVarSym(name, BoundBy.Let, loc)(RegionScope.Top, flix)
   }
 
   /**
@@ -1568,7 +1570,7 @@ object Lowering {
     val mergedExp = mergeExps(exps, loc)
     val argExps = mergedExp :: Nil
     val solvedExp = MonoAst.Expr.ApplyDef(defn, argExps, Types.SolveType, Types.Datalog, eff, loc)
-    val tmpVarSym = Symbol.freshVarSym("tmp%", BoundBy.Let, loc)(Scope.Top, flix)
+    val tmpVarSym = Symbol.freshVarSym("tmp%", BoundBy.Let, loc)(RegionScope.Top, flix)
     val letBodyExp = optPreds match {
       case Some(preds) =>
         mergeExps(preds.map(pred => {
@@ -1840,7 +1842,7 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Datalog.HeadTerm.Var` from the given variable symbol `sym`.
     */
-  private def mkHeadTermVar(sym: Symbol.VarSym): MonoAst.Expr = {
+  private def mkHeadTermVar(sym: Symbol.VarSym)(implicit root: TypedAst.Root): MonoAst.Expr = {
     val innerExp = List(mkVarSym(sym))
     mkTag(Enums.HeadTerm, "Var", innerExp, Types.HeadTerm, sym.loc)
   }
@@ -1848,21 +1850,21 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Datalog.HeadTerm.Lit` value which wraps the given expression `exp`.
     */
-  private def mkHeadTermLit(exp: MonoAst.Expr): MonoAst.Expr = {
+  private def mkHeadTermLit(exp: MonoAst.Expr)(implicit root: TypedAst.Root): MonoAst.Expr = {
     mkTag(Enums.HeadTerm, "Lit", List(exp), Types.HeadTerm, exp.loc)
   }
 
   /**
     * Constructs a `Fixpoint/Ast/Datalog.BodyTerm.Wild` from the given source location `loc`.
     */
-  private def mkBodyTermWild(loc: SourceLocation): MonoAst.Expr = {
+  private def mkBodyTermWild(loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = {
     mkTag(Enums.BodyTerm, "Wild", Nil, Types.BodyTerm, loc)
   }
 
   /**
     * Constructs a `Fixpoint/Ast/Datalog.BodyTerm.Var` from the given variable symbol `sym`.
     */
-  private def mkBodyTermVar(sym: Symbol.VarSym): MonoAst.Expr = {
+  private def mkBodyTermVar(sym: Symbol.VarSym)(implicit root: TypedAst.Root): MonoAst.Expr = {
     val innerExp = List(mkVarSym(sym))
     mkTag(Enums.BodyTerm, "Var", innerExp, Types.BodyTerm, sym.loc)
   }
@@ -1870,14 +1872,14 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Datalog.BodyTerm.Lit` from the given expression `exp0`.
     */
-  private def mkBodyTermLit(exp: MonoAst.Expr): MonoAst.Expr = {
+  private def mkBodyTermLit(exp: MonoAst.Expr)(implicit root: TypedAst.Root): MonoAst.Expr = {
     mkTag(Enums.BodyTerm, "Lit", List(exp), Types.BodyTerm, exp.loc)
   }
 
   /**
     * Constructs a `Fixpoint/Ast/Datalog.VarSym` from the given variable symbol `sym`.
     */
-  private def mkVarSym(sym: Symbol.VarSym): MonoAst.Expr = {
+  private def mkVarSym(sym: Symbol.VarSym)(implicit root: TypedAst.Root): MonoAst.Expr = {
     val nameExp = MonoAst.Expr.Cst(Constant.Str(sym.text), Type.Str, sym.loc)
     mkTag(Enums.VarSym, "VarSym", List(nameExp), Types.VarSym, sym.loc)
   }
@@ -1915,7 +1917,7 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Datalog.Polarity` from the given polarity `p`.
     */
-  private def mkPolarity(p: Polarity, loc: SourceLocation): MonoAst.Expr = p match {
+  private def mkPolarity(p: Polarity, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = p match {
     case Polarity.Positive =>
       mkTag(Enums.Polarity, "Positive", Nil, Types.Polarity, loc)
 
@@ -1926,7 +1928,7 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Datalog.Fixity` from the given fixity `f`.
     */
-  private def mkFixity(f: Fixity, loc: SourceLocation): MonoAst.Expr = f match {
+  private def mkFixity(f: Fixity, loc: SourceLocation)(implicit root: TypedAst.Root): MonoAst.Expr = f match {
     case Fixity.Loose =>
       mkTag(Enums.Fixity, "Loose", Nil, Types.Fixity, loc)
 
@@ -1948,7 +1950,7 @@ object Lowering {
 
     // Special case: No free variables.
     if (fvs.isEmpty) {
-      val sym = Symbol.freshVarSym("_unit", BoundBy.FormalParam, loc)(Scope.Top, flix)
+      val sym = Symbol.freshVarSym("_unit", BoundBy.FormalParam, loc)(RegionScope.Top, flix)
       // Construct a lambda that takes the unit argument.
       val fparam = MonoAst.FormalParam(sym, Type.Unit, Occur.Unknown, loc)
       val tpe = Type.mkPureArrow(Type.Unit, exp.tpe, loc)
@@ -2068,7 +2070,7 @@ object Lowering {
   /**
     * Constructs a `Fixpoint/Ast/Shared.PredSym` from the given predicate `pred`.
     */
-  private def mkPredSym(pred: Name.Pred): MonoAst.Expr = pred match {
+  private def mkPredSym(pred: Name.Pred)(implicit root: TypedAst.Root): MonoAst.Expr = pred match {
     case Name.Pred(sym, loc) =>
       val nameExp = MonoAst.Expr.Cst(Constant.Str(sym), Type.Str, loc)
       val idExp = MonoAst.Expr.Cst(Constant.Int64(0), Type.Int64, loc)
@@ -2389,8 +2391,8 @@ object Lowering {
     * where `P1, P2, ...` are in `preds` with their respective term types.
     */
   private def mkExtVarLambda(preds: List[(Name.Pred, List[Type])], tpe: Type, loc: SourceLocation)(implicit ctx: Context, lctx: LocalContext, root: TypedAst.Root, flix: Flix): MonoAst.Expr = {
-    val predSymVar = Symbol.freshVarSym("predSym", BoundBy.FormalParam, loc)(Scope.Top, flix)
-    val termsVar = Symbol.freshVarSym("terms", BoundBy.FormalParam, loc)(Scope.Top, flix)
+    val predSymVar = Symbol.freshVarSym("predSym", BoundBy.FormalParam, loc)(RegionScope.Top, flix)
+    val termsVar = Symbol.freshVarSym("terms", BoundBy.FormalParam, loc)(RegionScope.Top, flix)
     mkLambdaExp(predSymVar, Types.PredSym,
       mkLambdaExp(termsVar, Types.VectorOfBoxed,
         mkExtVarBody(preds, predSymVar, termsVar, tpe, loc),
@@ -2430,13 +2432,13 @@ object Lowering {
     * and `"terms" == termsVar.text`.
     */
   private def mkExtVarBody(preds: List[(Name.Pred, List[Type])], predSymVar: Symbol.VarSym, termsVar: Symbol.VarSym, tpe: Type, loc: SourceLocation)(implicit ctx: Context, lctx: LocalContext, root: TypedAst.Root, flix: Flix): MonoAst.Expr = {
-    val nameVar = Symbol.freshVarSym(Name.Ident("name", loc), BoundBy.Pattern)(Scope.Top, flix)
+    val nameVar = Symbol.freshVarSym(Name.Ident("name", loc), BoundBy.Pattern)(RegionScope.Top, flix)
     MonoAst.Expr.Match(
       exp = MonoAst.Expr.Var(predSymVar, Types.PredSym, loc),
       rules = List(
         MonoAst.MatchRule(
           pat = MonoAst.Pattern.Tag(
-            symUse = SymUse.CaseSymUse(Symbol.mkCaseSym(Enums.PredSym, Name.Ident("PredSym", loc)), loc),
+            symUse = SymUse.CaseSymUse(root.enums(Enums.PredSym).cases.values.find(_.sym.name == "PredSym").get.sym, loc),
             pats = List(
               MonoAst.Pattern.Var(nameVar, Type.Str, Occur.Unknown, loc),
               MonoAst.Pattern.Wild(Type.Int64, loc)

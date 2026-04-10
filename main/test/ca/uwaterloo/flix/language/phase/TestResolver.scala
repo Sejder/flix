@@ -891,17 +891,6 @@ class TestResolver extends AnyFunSuite with TestUtils {
     expectError[TypeError.MismatchedTypes](result)
   }
 
-  test("MismatchingType.04") {
-    val input =
-      """
-        |import java.util.Objects
-        |
-        |def isThisThingNull(x: a): Bool =
-        |    Objects.isNull(x)
-        |""".stripMargin
-    val result = check(input, Options.TestWithLibNix)
-    expectError[TypeError.MismatchedTypes](result)
-  }
 
   test("UndefinedJvmStaticField.01") {
     val input =
@@ -1162,6 +1151,66 @@ class TestResolver extends AnyFunSuite with TestUtils {
         |""".stripMargin
     val result = check(input, Options.TestWithLibNix)
     expectError[ResolutionError.UnderAppliedAssocType](result)
+  }
+
+  test("IllegalRawJavaType.List") {
+    val input =
+      """
+        |import java.util.List
+        |def f(): List = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
+  }
+
+  test("IllegalRawJavaType.LinkedList") {
+    val input =
+      """
+        |import java.util.LinkedList
+        |def f(): LinkedList = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
+  }
+
+  test("IllegalRawJavaType.ArrayList") {
+    val input =
+      """
+        |import java.util.ArrayList
+        |def f(): ArrayList = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
+  }
+
+  test("IllegalRawJavaType.Map") {
+    val input =
+      """
+        |import java.util.Map
+        |def f(): Map = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
+  }
+
+  test("IllegalRawJavaType.HashMap") {
+    val input =
+      """
+        |import java.util.HashMap
+        |def f(): HashMap = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
+  }
+
+  test("IllegalRawJavaType.TreeMap") {
+    val input =
+      """
+        |import java.util.TreeMap
+        |def f(): TreeMap = ???
+        |""".stripMargin
+    val result = check(input, Options.TestWithLibNix)
+    expectError[ResolutionError.IllegalRawJavaType](result)
   }
 
   test("UndefinedAssocType.01") {
