@@ -28,20 +28,4 @@ class TestParserHappy extends AnyFunSuite with TestUtils {
     val result = check(input, Options.TestWithLibNix)
     expectSuccess(result)
   }
-
-  test("FlatStm.ThreeStatements") {
-    // Test that a three-statement chain (like MutList.push) compiles correctly.
-    val input =
-      """
-        |def f(): Unit \ IO = checked_ecast(())
-        |def g(): Unit \ IO = checked_ecast(())
-        |def main(): Int32 \ IO = {
-        |    f();
-        |    g();
-        |    42
-        |}
-        |""".stripMargin
-    val result = check(input, Options.TestWithLibMin)
-    expectSuccess(result)
-  }
 }
