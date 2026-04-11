@@ -52,6 +52,12 @@ object PublishDiagnosticsParams {
         PublishDiagnosticsParams(source.name, diagnostics) :: acc
     }
   }
+
+  def merge(params: List[PublishDiagnosticsParams]): List[PublishDiagnosticsParams] = {
+    params.groupBy(_.uri).map {
+      case (uri, ps) => PublishDiagnosticsParams(uri, ps.flatMap(_.diagnostics))
+    }.toList
+  }
 }
 
 /**
