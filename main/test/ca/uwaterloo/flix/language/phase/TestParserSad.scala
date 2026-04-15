@@ -554,4 +554,5 @@ class TestParserSad extends AnyFunSuite with TestUtils {
     val error = check(input, Options.TestWithLibNix)
     expectError[ParseError.MissingBinaryOperator](error)
   }
+
 }
