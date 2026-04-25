@@ -53,6 +53,11 @@ object PublishDiagnosticsParams {
     }
   }
 
+  /**
+    * Merges `params` by URI, combining the diagnostics of entries that share the same URI into a single entry.
+    * This is necessary because each `publishDiagnostics` call replaces all previous diagnostics for that URI in the LSP protocol.
+    * For example, error diagnostics and code hint diagnostics for the same file are combined into one entry.
+    */
   def merge(params: List[PublishDiagnosticsParams]): List[PublishDiagnosticsParams] = {
     params.groupBy(_.uri).map {
       case (uri, ps) => PublishDiagnosticsParams(uri, ps.flatMap(_.diagnostics))
