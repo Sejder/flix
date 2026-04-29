@@ -2242,6 +2242,7 @@ object Parser2 {
     }
 
     private def letBinding()(implicit s: State): Unit = {
+      implicit val sctx: SyntacticContext = SyntacticContext.Expr.OtherExpr
       val b = open()
       expect(TokenKind.KeywordLet)
       Pattern.pattern()
