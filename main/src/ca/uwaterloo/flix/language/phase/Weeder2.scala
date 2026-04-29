@@ -1386,30 +1386,40 @@ object Weeder2 {
       }
     }
 
-    private def visitStatementExpr(tree: Tree)(implicit sctx: SharedContext): Validation[Expr, CompilationMessage] = {
-      expect(tree, TreeKind.Expr.Statement)
-      // Iteratively collect expression trees from the right-nested Statement chain
-      // to avoid stack overflow on long statement sequences (e.g. 5000+ semicolons).
-      val headTrees = mutable.ArrayBuffer.empty[Tree]
+    /**
+      * Flattens a right-nested Statement tree into a list of head expression trees and a single tail tree.
+      * Uses `unfold` to peek through Expr.Expr wrapper nodes.
+      *
+      * Example: Statement(f(), Expr(Statement(g(), Expr(h()))))
+      *       => (List(f(), g()), h())
+      */
+    private def flattenStmTree(tree: Tree): (List[Tree], Tree) = {
+      val heads = mutable.ArrayBuffer.empty[Tree]
       var current = tree
+      var tail: Tree = null
       var done = false
-      var tailTree: Tree = null
       while (!done) {
         pickAll(TreeKind.Expr.Expr, current) match {
           case first :: second :: Nil =>
-            headTrees.addOne(first)
+            heads.addOne(first)
             val inner = unfold(second)
             if (inner.kind == TreeKind.Expr.Statement) {
               current = inner
             } else {
-              tailTree = second
+              tail = second
               done = true
             }
           case exprs =>
             throw InternalCompilerException(s"Parser error. Expected 2 expressions in statement but found '${exprs.length}'.", current.loc)
         }
       }
-      mapN(traverse(headTrees.toList)(visitExpr), visitExpr(tailTree)) {
+      (heads.toList, tail)
+    }
+
+    private def visitStatementExpr(tree: Tree)(implicit sctx: SharedContext): Validation[Expr, CompilationMessage] = {
+      expect(tree, TreeKind.Expr.Statement)
+      val (headTrees, tailTree) = flattenStmTree(tree)
+      mapN(traverse(headTrees)(visitExpr), visitExpr(tailTree)) {
         case (exps, exp) => Expr.Stm(exps, exp, tree.loc)
       }
     }
@@ -1644,6 +1654,12 @@ object Weeder2 {
       }
     }
 
+    /**
+      * Weeds a [[TreeKind.Expr.LetSeq]] tree produced by the iterative let-binding parser.
+      *
+      * Example: LetSeq([Binding(x,_,1), Binding(y,_,x+1)], Expr(y*2))
+      *       => Expr.LetSeq([(x,None,1),(y,None,x+1)], y*2)
+      */
     private def visitLetSeqExpr(tree: Tree)(implicit sctx: SharedContext): Validation[Expr, CompilationMessage] = {
       expect(tree, TreeKind.Expr.LetSeq)
       val bindingTrees = pickAll(TreeKind.Expr.LetBinding, tree)

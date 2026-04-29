@@ -1433,7 +1433,8 @@ object Parser2 {
       */
     def statement(rhsIsOptional: Boolean = true)(implicit s: State): Mark.Closed = {
       implicit val sctx: SyntacticContext = SyntacticContext.Expr.OtherExpr
-      // Collect expression marks iteratively to avoid stack overflow on long statement chains.
+      // Formerly recursive: each branch called statement() then wrapped the result with openBefore.
+      // Now iterative: each branch adds an expression mark to exprMarks; the tree is built below.
       val exprMarks = ArrayBuffer.empty[Mark.Closed]
       exprMarks.addOne(expression())
       var continue = true
@@ -1496,15 +1497,16 @@ object Parser2 {
         expect(TokenKind.Semi)
       }
       // Build right-nested Statement tree from right to left.
-      // Processing from right to left ensures that openBefore insertions at higher
-      // indices do not invalidate earlier (lower-index) marks.
-      if (exprMarks.length >= 2) {
-        for (i <- (exprMarks.length - 2) to 0 by -1) {
-          val stm = close(openBefore(exprMarks(i)), TreeKind.Expr.Statement)
-          exprMarks(i) = close(openBefore(stm), TreeKind.Expr.Expr)
-        }
+      // openBefore inserts at the mark's position, shifting all tokens rightward.
+      // Going right to left ensures each insertion only affects already-processed marks.
+      var result = exprMarks.last
+      var i = exprMarks.length - 2
+      while (i >= 0) {
+        val stm = close(openBefore(exprMarks(i)), TreeKind.Expr.Statement)
+        result = close(openBefore(stm), TreeKind.Expr.Expr)
+        i -= 1
       }
-      exprMarks(0)
+      result
     }
 
     def expression(leftOpt: Option[Op] = None)(implicit s: State): Mark.Closed = {
@@ -2208,11 +2210,38 @@ object Parser2 {
       close(mark, TreeKind.Expr.IfThenElse)
     }
 
+    /**
+      * Parses a sequence of consecutive let-bindings followed by a body expression.
+      * Collects bindings iteratively to avoid stack overflow on long let-chains.
+      *
+      * Each additional binding requires a one-token lookahead: the semicolon must be
+      * immediately followed by `let` to continue the loop.
+      *
+      * Example: `let x = 1; let y = x + 1; y * 2`
+      *       => LetSeq([Binding(x, 1), Binding(y, x+1)], y*2)
+      */
     private def letMatchExpr()(implicit s: State): Mark.Closed = {
       implicit val sctx: SyntacticContext = SyntacticContext.Expr.OtherExpr
       assert(at(TokenKind.KeywordLet))
       val mark = open()
-      // Parse the first binding.
+      letBinding()
+      while (at(TokenKind.Semi) && nth(1) == TokenKind.KeywordLet) {
+        eat(TokenKind.Semi)
+        letBinding()
+      }
+      // Eat the semicolon so that `statement()` starts at the first body expression.
+      // All leading `let`s are consumed above, so `statement()` will not re-enter
+      // the let-binding loop.
+      if (eat(TokenKind.Semi)) {
+        statement()
+      } else {
+        val loc = SourceLocation.point(true, s.src, previousSourceLocation().end)
+        closeWithError(open(), ParseError.ExpectedSemicolon(sctx, loc, nth(0)))
+      }
+      close(mark, TreeKind.Expr.LetSeq)
+    }
+
+    private def letBinding()(implicit s: State): Unit = {
       val b = open()
       expect(TokenKind.KeywordLet)
       Pattern.pattern()
@@ -2222,33 +2251,6 @@ object Parser2 {
       expect(TokenKind.Equal)
       letBoundValue()
       close(b, TreeKind.Expr.LetBinding)
-      // Collect consecutive `; let` bindings iteratively to avoid stack overflow
-      // on long let-binding chains (e.g. 5000+ consecutive lets).
-      // Each additional binding is checked with one-token lookahead: the semicolon
-      // must be followed immediately by `let` to enter the loop.
-      while (at(TokenKind.Semi) && nth(1) == TokenKind.KeywordLet) {
-        eat(TokenKind.Semi)
-        val bn = open()
-        expect(TokenKind.KeywordLet)
-        Pattern.pattern()
-        if (eat(TokenKind.Colon)) {
-          Type.ttype()
-        }
-        expect(TokenKind.Equal)
-        letBoundValue()
-        close(bn, TreeKind.Expr.LetBinding)
-      }
-      // Parse the body.  We eat the semicolon here so that `statement()` starts
-      // directly at the first body expression (not at a `;` token).
-      // The body cannot start with a bare `let` (we consumed all leading lets
-      // above), so `statement()` will not recurse back into `letMatchExpr`.
-      if (eat(TokenKind.Semi)) {
-        statement()
-      } else {
-        val loc = SourceLocation.point(true, s.src, previousSourceLocation().end)
-        closeWithError(open(), ParseError.ExpectedSemicolon(sctx, loc, nth(0)))
-      }
-      close(mark, TreeKind.Expr.LetSeq)
     }
 
     /**
@@ -2259,7 +2261,7 @@ object Parser2 {
       */
     private def letBoundValue()(implicit s: State): Unit = {
       implicit val sctx: SyntacticContext = SyntacticContext.Expr.OtherExpr
-      var exprMark = expression()
+      val exprMark = expression()
       if (nth(0).canFollowBinaryOperator && s.inBlock) {
         val isNewLine = previousSourceLocation().end.lineOneIndexed != currentSourceLocation().start.lineOneIndexed
         if (!isNewLine) {
